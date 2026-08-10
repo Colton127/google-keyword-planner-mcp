@@ -112,12 +112,14 @@ func TestGetKeywordForecast_ZeroMaxCPCMicros_DefaultsTo1Million(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"adGroupForecastMetrics": []any{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"campaignForecastMetrics": map[string]any{}})
 	}))
 	defer srv.Close()
 
 	client := keywordplanner.NewTestClient("dev-token", "123", "", srv.URL, srv.Client())
-	_, err := client.GetKeywordForecast(context.Background(), []string{"go"}, 0, 30)
+	_, err := client.GetKeywordForecast(context.Background(), keywordplanner.ForecastRequest{
+		Keywords: []string{"go"},
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,9 +128,172 @@ func TestGetKeywordForecast_ZeroMaxCPCMicros_DefaultsTo1Million(t *testing.T) {
 	if err := json.Unmarshal(capturedBody, &req); err != nil {
 		t.Fatalf("failed to parse captured request body: %v", err)
 	}
-	bidMicros := req["campaignForecastSpec"].(map[string]any)["biddingStrategy"].(map[string]any)["manualCpcBiddingStrategy"].(map[string]any)["maxCpcBidMicros"]
+	bidMicros := req["campaign"].(map[string]any)["biddingStrategy"].(map[string]any)["manualCpcBiddingStrategy"].(map[string]any)["maxCpcBidMicros"]
 	if bidMicros != "1000000" {
 		t.Errorf("maxCpcBidMicros = %v, want %q", bidMicros, "1000000")
+	}
+}
+
+// TestGetKeywordForecast_SendsV25RequestShape pins the request body to the
+// GenerateKeywordForecastMetricsRequest shape: the forecast period is a
+// top-level DateRange, the campaign is a CampaignToForecast, and the ad group
+// carries a plain "keywords" list. The pre-v24 "campaignForecastSpec" wrapper
+// and "biddableKeywords" list are rejected by the API with HTTP 400.
+func TestGetKeywordForecast_SendsV25RequestShape(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"campaignForecastMetrics": map[string]any{}})
+	}))
+	defer srv.Close()
+
+	client := keywordplanner.NewTestClient("dev-token", "123", "", srv.URL, srv.Client())
+	_, err := client.GetKeywordForecast(context.Background(), keywordplanner.ForecastRequest{
+		Keywords:           []string{"kurs ceramiki"},
+		MatchType:          "phrase",
+		GeoTargetConstants: []string{"geoTargetConstants/2616"},
+		Language:           "languageConstants/1030",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var req map[string]any
+	if err := json.Unmarshal(capturedBody, &req); err != nil {
+		t.Fatalf("failed to parse captured request body: %v", err)
+	}
+
+	if _, ok := req["campaignForecastSpec"]; ok {
+		t.Error("request still carries the removed campaignForecastSpec wrapper")
+	}
+	period, ok := req["forecastPeriod"].(map[string]any)
+	if !ok {
+		t.Fatal("request is missing the top-level forecastPeriod")
+	}
+	if period["startDate"] == "" || period["endDate"] == "" {
+		t.Errorf("forecastPeriod is incomplete: %v", period)
+	}
+
+	campaign := req["campaign"].(map[string]any)
+	if got := campaign["geoTargetConstants"].([]any)[0]; got != "geoTargetConstants/2616" {
+		t.Errorf("geoTargetConstants[0] = %v, want geo target 2616", got)
+	}
+	if got := campaign["languageConstants"].([]any)[0]; got != "languageConstants/1030" {
+		t.Errorf("languageConstants[0] = %v, want Polish", got)
+	}
+
+	adGroup := campaign["adGroups"].([]any)[0].(map[string]any)
+	if _, ok := adGroup["biddableKeywords"]; ok {
+		t.Error("ad group still carries the removed biddableKeywords list")
+	}
+	keyword := adGroup["keywords"].([]any)[0].(map[string]any)
+	if keyword["text"] != "kurs ceramiki" {
+		t.Errorf("keyword text = %v, want %q", keyword["text"], "kurs ceramiki")
+	}
+	if keyword["matchType"] != "PHRASE" {
+		t.Errorf("matchType = %v, want PHRASE", keyword["matchType"])
+	}
+}
+
+// TestGetKeywordForecast_ForecastsEachKeywordAndTheCombinedAdGroup verifies the
+// per-keyword breakdown. The API returns a single campaign-level aggregate per
+// request, so N keywords require N requests plus one for the combined total.
+func TestGetKeywordForecast_ForecastsEachKeywordAndTheCombinedAdGroup(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"campaignForecastMetrics": map[string]any{
+				"clicks":     10.5,
+				"costMicros": "14285916",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := keywordplanner.NewTestClient("dev-token", "123", "", srv.URL, srv.Client())
+	result, err := client.GetKeywordForecast(context.Background(), keywordplanner.ForecastRequest{
+		Keywords: []string{"kurs ceramiki", "warsztaty ceramiczne"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if requests != 3 {
+		t.Errorf("made %d requests, want 3 (one per keyword plus the combined total)", requests)
+	}
+	if len(result.Keywords) != 2 {
+		t.Fatalf("got %d per-keyword forecasts, want 2", len(result.Keywords))
+	}
+	if result.Keywords[0].Text != "kurs ceramiki" {
+		t.Errorf("Keywords[0].Text = %q, want %q", result.Keywords[0].Text, "kurs ceramiki")
+	}
+	if result.Keywords[0].CostMicros != 14285916 {
+		t.Errorf("Keywords[0].CostMicros = %d, want 14285916", result.Keywords[0].CostMicros)
+	}
+	if result.Total.Clicks != 10.5 {
+		t.Errorf("Total.Clicks = %v, want 10.5", result.Total.Clicks)
+	}
+}
+
+// TestGetHistoricalMetrics_ParsesResultsField pins the response field name.
+// GenerateKeywordHistoricalMetricsResponse returns "results"; parsing "metrics"
+// produced an empty keyword list on every call without surfacing an error.
+func TestGetHistoricalMetrics_ParsesResultsField(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": []any{
+				map[string]any{
+					"text": "warsztaty ceramiczne",
+					"keywordMetrics": map[string]any{
+						"avgMonthlySearches": "2400",
+						"competition":        "HIGH",
+						"competitionIndex":   "67",
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := keywordplanner.NewTestClient("dev-token", "123", "", srv.URL, srv.Client())
+	result, err := client.GetHistoricalMetrics(
+		context.Background(),
+		[]string{"warsztaty ceramiczne"},
+		"languageConstants/1030",
+		[]string{"geoTargetConstants/2616"},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Count != 1 {
+		t.Fatalf("Count = %d, want 1", result.Count)
+	}
+	if result.Keywords[0].AvgMonthlySearches != 2400 {
+		t.Errorf("AvgMonthlySearches = %d, want 2400", result.Keywords[0].AvgMonthlySearches)
+	}
+
+	var req map[string]any
+	if err := json.Unmarshal(capturedBody, &req); err != nil {
+		t.Fatalf("failed to parse captured request body: %v", err)
+	}
+	if req["language"] != "languageConstants/1030" {
+		t.Errorf("language = %v, want Polish", req["language"])
+	}
+	if got := req["geoTargetConstants"].([]any)[0]; got != "geoTargetConstants/2616" {
+		t.Errorf("geoTargetConstants[0] = %v, want geo target 2616", got)
 	}
 }
 

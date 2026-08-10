@@ -17,8 +17,8 @@ import (
 
 const (
 	tokenURL    = "https://oauth2.googleapis.com/token"
-	adsAPIBase  = "https://googleads.googleapis.com/v23"
-	adsAPIVersion = "v23"
+	adsAPIBase  = "https://googleads.googleapis.com/v25"
+	adsAPIVersion = "v25"
 	httpTimeout = 30 * time.Second
 )
 
@@ -113,11 +113,21 @@ func (c *Client) GenerateKeywordIdeas(
 }
 
 // GetHistoricalMetrics returns historical search metrics for a list of keywords.
+//
+// language and geoTargetConstants are optional but strongly recommended:
+// without them the search volumes cover the whole world in every language,
+// which is not what a targeted campaign will see.
 func (c *Client) GetHistoricalMetrics(
 	ctx context.Context,
 	keywords []string,
+	language string,
+	geoTargetConstants []string,
 ) (*HistoricalMetricsResponse, error) {
-	reqBody := generateHistoricalMetricsRequest{Keywords: keywords}
+	reqBody := generateHistoricalMetricsRequest{
+		Keywords:           keywords,
+		Language:           language,
+		GeoTargetConstants: geoTargetConstants,
+	}
 	endpoint := fmt.Sprintf("%s/customers/%s:generateKeywordHistoricalMetrics", c.baseURL, c.customerID)
 
 	var raw generateHistoricalMetricsResponse
@@ -125,12 +135,12 @@ func (c *Client) GetHistoricalMetrics(
 		return nil, err
 	}
 
-	metrics := make([]KeywordMetrics, 0, len(raw.Metrics))
-	for _, r := range raw.Metrics {
+	metrics := make([]KeywordMetrics, 0, len(raw.Results))
+	for _, r := range raw.Results {
 		monthly := make([]MonthlyVolume, 0, len(r.KeywordMetrics.MonthlySearchVolumes))
 		for _, m := range r.KeywordMetrics.MonthlySearchVolumes {
 			monthly = append(monthly, MonthlyVolume{
-				Year:            m.Year,
+				Year:            int32(parseI64(m.Year)),
 				Month:           parseMonthEnum(m.Month),
 				MonthlySearches: parseI64(m.MonthlySearches),
 			})
@@ -139,7 +149,7 @@ func (c *Client) GetHistoricalMetrics(
 			Text:                   r.Text,
 			AvgMonthlySearches:     parseI64(r.KeywordMetrics.AvgMonthlySearches),
 			Competition:            r.KeywordMetrics.Competition,
-			CompetitionIndex:       r.KeywordMetrics.CompetitionIndex,
+			CompetitionIndex:       int32(parseI64(r.KeywordMetrics.CompetitionIndex)),
 			LowTopOfPageBidMicros:  parseI64(r.KeywordMetrics.LowTopOfPageBidMicros),
 			HighTopOfPageBidMicros: parseI64(r.KeywordMetrics.HighTopOfPageBidMicros),
 			MonthlySearchVolumes:   monthly,
@@ -149,67 +159,115 @@ func (c *Client) GetHistoricalMetrics(
 	return &HistoricalMetricsResponse{Keywords: metrics, Count: len(metrics)}, nil
 }
 
+// ForecastRequest describes a keyword forecast to run.
+//
+// GeoTargetConstants and Language are optional but strongly recommended: with
+// neither set the API forecasts worldwide traffic across all languages, which
+// bears no resemblance to what a geographically targeted campaign will deliver.
+type ForecastRequest struct {
+	Keywords           []string
+	MatchType          string
+	MaxCPCMicros       int64
+	ForecastDays       int
+	GeoTargetConstants []string
+	Language           string
+	CurrencyCode       string
+}
+
 // GetKeywordForecast returns projected performance metrics for a set of keywords.
-func (c *Client) GetKeywordForecast(
-	ctx context.Context,
-	keywords []string,
-	maxCPCMicros int64,
-	forecastDays int,
-) (*ForecastResponse, error) {
+//
+// The API returns one campaign-level aggregate per request, so this issues one
+// request per keyword to build the per-keyword breakdown, plus one request with
+// every keyword in a single ad group for the campaign total. The per-keyword
+// figures will not sum to the total: keywords in one ad group compete for the
+// same impressions and the total accounts for that overlap.
+func (c *Client) GetKeywordForecast(ctx context.Context, req ForecastRequest) (*ForecastResponse, error) {
+	if len(req.Keywords) == 0 {
+		return nil, fmt.Errorf("at least one keyword is required")
+	}
+	forecastDays := req.ForecastDays
 	if forecastDays <= 0 {
 		forecastDays = 30
 	}
+	maxCPCMicros := req.MaxCPCMicros
 	if maxCPCMicros <= 0 {
 		maxCPCMicros = 1_000_000
 	}
-	now := time.Now().UTC()
-	startDate := now.Format("2006-01-02")
-	endDate := now.AddDate(0, 0, forecastDays).Format("2006-01-02")
-
-	biddable := make([]adGroupForecastKeyword, 0, len(keywords))
-	for _, kw := range keywords {
-		biddable = append(biddable, adGroupForecastKeyword{
-			Keyword: forecastKeyword{Text: kw, MatchType: "BROAD"},
-		})
+	matchType := strings.ToUpper(strings.TrimSpace(req.MatchType))
+	if matchType == "" {
+		matchType = "BROAD"
 	}
 
-	reqBody := generateForecastMetricsRequest{
-		CampaignForecastSpec: campaignForecastSpec{
-			BiddingStrategy: biddingStrategy{
-				ManualCpcBiddingStrategy: manualCpcBiddingStrategy{
-					MaxCPCBidMicros: strconv.FormatInt(maxCPCMicros, 10),
-				},
-			},
-			StartDate: startDate,
-			EndDate:   endDate,
-			AdGroups:  []adGroupForecast{{Biddable: biddable}},
-		},
-	}
+	// The forecast period must lie in the future; starting tomorrow keeps the
+	// request valid regardless of the account's time zone.
+	start := time.Now().UTC().AddDate(0, 0, 1)
+	startDate := start.Format("2006-01-02")
+	endDate := start.AddDate(0, 0, forecastDays-1).Format("2006-01-02")
 
-	endpoint := fmt.Sprintf("%s/customers/%s:generateKeywordForecastMetrics", c.baseURL, c.customerID)
-
-	var raw generateForecastMetricsResponse
-	if err := c.post(ctx, endpoint, reqBody, &raw); err != nil {
-		return nil, err
-	}
-
-	var forecastMetrics []KeywordForecastMetrics
-	for _, ag := range raw.AdGroupForecastMetrics {
-		for _, kf := range ag.KeywordForecastMetrics {
-			forecastMetrics = append(forecastMetrics, KeywordForecastMetrics{
-				Text:        kf.Keyword.Text,
-				Impressions: kf.Metrics.Impressions,
-				Clicks:      kf.Metrics.Clicks,
-				CostMicros:  kf.Metrics.CostMicros,
-				CTR:         kf.Metrics.CTR,
-			})
+	forecast := func(keywords []string) (KeywordForecastMetrics, error) {
+		infos := make([]forecastKeyword, 0, len(keywords))
+		for _, kw := range keywords {
+			infos = append(infos, forecastKeyword{Text: kw, MatchType: matchType})
 		}
+
+		reqBody := generateForecastMetricsRequest{
+			CurrencyCode:   req.CurrencyCode,
+			ForecastPeriod: dateRange{StartDate: startDate, EndDate: endDate},
+			Campaign: campaignForecast{
+				GeoTargetConstants: req.GeoTargetConstants,
+				BiddingStrategy: biddingStrategy{
+					ManualCpcBiddingStrategy: manualCpcBiddingStrategy{
+						MaxCPCBidMicros: strconv.FormatInt(maxCPCMicros, 10),
+					},
+				},
+				AdGroups: []adGroupForecast{{Keywords: infos}},
+			},
+		}
+		if req.Language != "" {
+			reqBody.Campaign.LanguageConstants = []string{req.Language}
+		}
+
+		endpoint := fmt.Sprintf("%s/customers/%s:generateKeywordForecastMetrics", c.baseURL, c.customerID)
+
+		var raw generateForecastMetricsResponse
+		if err := c.post(ctx, endpoint, reqBody, &raw); err != nil {
+			return KeywordForecastMetrics{}, err
+		}
+
+		m := raw.CampaignForecastMetrics
+		return KeywordForecastMetrics{
+			Clicks:           m.Clicks,
+			CostMicros:       parseI64(m.CostMicros),
+			AverageCPCMicros: parseI64(m.AverageCPCMicros),
+			Conversions:      m.Conversions,
+			AverageCPAMicros: parseI64(m.AverageCPAMicros),
+		}, nil
+	}
+
+	perKeyword := make([]KeywordForecastMetrics, 0, len(req.Keywords))
+	for _, kw := range req.Keywords {
+		metrics, err := forecast([]string{kw})
+		if err != nil {
+			return nil, fmt.Errorf("forecasting %q: %w", kw, err)
+		}
+		metrics.Text = kw
+		perKeyword = append(perKeyword, metrics)
+	}
+
+	total, err := forecast(req.Keywords)
+	if err != nil {
+		return nil, fmt.Errorf("forecasting combined ad group: %w", err)
 	}
 
 	return &ForecastResponse{
-		Keywords:     forecastMetrics,
-		ForecastDays: forecastDays,
-		MaxCPCMicros: maxCPCMicros,
+		Keywords:           perKeyword,
+		Total:              total,
+		ForecastDays:       forecastDays,
+		MaxCPCMicros:       maxCPCMicros,
+		StartDate:          startDate,
+		EndDate:            endDate,
+		GeoTargetConstants: req.GeoTargetConstants,
+		Language:           req.Language,
 	}, nil
 }
 

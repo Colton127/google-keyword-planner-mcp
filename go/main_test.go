@@ -274,12 +274,12 @@ func TestGetHistoricalMetrics_Success_ReturnsMarshaledMetrics(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"metrics": [{
+			"results": [{
 				"text": "dependency injection",
 				"keywordMetrics": {
 					"avgMonthlySearches": "1000",
 					"competition": "MEDIUM",
-					"competitionIndex": 50,
+					"competitionIndex": "50",
 					"lowTopOfPageBidMicros": "100000",
 					"highTopOfPageBidMicros": "500000",
 					"monthlySearchVolumes": []
