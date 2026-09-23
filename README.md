@@ -19,7 +19,7 @@ AI assistants are powerful at SEO and content strategy -- but they need real key
 
 - **Keyword ideas** -- related keywords with average monthly searches, competition level, and CPC estimates from a seed keyword or URL
 - **Historical metrics** -- search volume trends, competition scores, and bid ranges for any list of keywords
-- **Forecasts** -- projected impressions, clicks, and cost for a set of keywords at a given max CPC bid
+- **Forecasts** -- projected clicks and cost for a set of keywords at a given max CPC bid
 
 With this MCP server configured, you can ask your AI: _"What keywords should I target for a blog post about dependency injection in C#? What's the search volume and competition look like?"_ and get a real data-backed answer.
 
@@ -31,7 +31,7 @@ With this MCP server configured, you can ask your AI: _"What keywords should I t
 |------|-------------|
 | `generate_keyword_ideas` | Generate related keywords from seed keywords and/or a URL with search volume and CPC data |
 | `get_historical_metrics` | Get historical search volume, competition, and CPC for a list of keywords |
-| `get_keyword_forecast` | Get projected impressions, clicks, and cost for keywords at a given max CPC bid |
+| `get_keyword_forecast` | Get projected clicks and cost for keywords at a given max CPC bid |
 
 ---
 
@@ -41,11 +41,9 @@ With this MCP server configured, you can ask your AI: _"What keywords should I t
 
 You need:
 
-1. A **Google Ads manager account (MCC)** -- developer tokens are only issued to manager accounts, not regular accounts. Create one free at [ads.google.com/home/tools/manager-accounts](https://ads.google.com/home/tools/manager-accounts/) if you don't have one.
+1. Google Ads API access on the Google Cloud project that owns your OAuth client. Basic access is sufficient for production use. [Google's developer-token sunset guide](https://developers.google.com/google-ads/api/docs/api-policy/developer-token) explains the current access model. A manager account is needed only when you access the target customer through one.
 
-2. A **Google Ads developer token with Basic or Standard access** -- in your manager account, go to `https://ads.google.com/aw/apicenter` and copy your developer token.
-
-   > **⚠️ New tokens start in test mode.** A brand-new developer token can only call the API against [Google Ads test accounts](https://developers.google.com/google-ads/api/docs/best-practices/test-accounts). Calls to any real account return `DEVELOPER_TOKEN_NOT_APPROVED` until you apply for Basic access. To apply: in the API Center (`https://ads.google.com/aw/apicenter`), click **Apply for Basic Access** and fill in the form. Google reviews requests within a few days. You do not need Standard access -- Basic access is sufficient for the Keyword Planner API.
+2. An OAuth user with access to the target Google Ads customer.
 
 3. A **Google Ads account with billing configured** -- the Keyword Planner API requires an account with an active payment method. You do not need to run any ads or spend money; you just need a payment method on file. This can be your manager account itself (if it has billing) or a separate sub-account.
 
@@ -158,7 +156,6 @@ Download the latest binary for your platform from the [Releases page](https://gi
       "command": "/path/to/kwp-mcp-go-linux-amd64",
       "args": [],
       "env": {
-        "GOOGLE_ADS_DEVELOPER_TOKEN": "your-developer-token",
         "GOOGLE_ADS_CLIENT_ID": "your-client-id.apps.googleusercontent.com",
         "GOOGLE_ADS_CLIENT_SECRET": "your-client-secret",
         "GOOGLE_ADS_REFRESH_TOKEN": "your-refresh-token",
@@ -180,7 +177,6 @@ Download the latest binary for your platform from the [Releases page](https://gi
     "keyword-planner": {
       "command": "/path/to/kwp-mcp-go-linux-amd64",
       "env": {
-        "GOOGLE_ADS_DEVELOPER_TOKEN": "your-developer-token",
         "GOOGLE_ADS_CLIENT_ID": "your-client-id.apps.googleusercontent.com",
         "GOOGLE_ADS_CLIENT_SECRET": "your-client-secret",
         "GOOGLE_ADS_REFRESH_TOKEN": "your-refresh-token",
@@ -210,7 +206,7 @@ The Google Ads Keyword Planner API **requires an account with billing configured
 
 | Error | Meaning | Fix |
 |-------|---------|-----|
-| `DEVELOPER_TOKEN_NOT_APPROVED` | Your developer token is in test mode and cannot access real accounts | Apply for Basic access at `https://ads.google.com/aw/apicenter` and wait for Google approval (a few days) |
+| `CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION` | The OAuth client’s Cloud project lacks production API access | Check its Google Ads API Overview page in Google Cloud Console |
 | `USER_PERMISSION_DENIED` with mention of `login-customer-id` | The account is a managed sub-account but `GOOGLE_ADS_LOGIN_CUSTOMER_ID` is missing or wrong | Set `GOOGLE_ADS_LOGIN_CUSTOMER_ID` to your manager account ID |
 | `USER_PERMISSION_DENIED` without mention of `login-customer-id` | The OAuth user doesn't have access to the customer account | Complete the OAuth flow as the Google account that owns or has access to the ads account |
 | HTTP 400 `INVALID_ARGUMENT` | Often a malformed customer ID or missing required field | Check that `GOOGLE_ADS_CUSTOMER_ID` contains only digits (dashes are stripped automatically) |
@@ -223,7 +219,7 @@ Credentials are resolved in this priority order: **CLI flag > environment variab
 
 | Credential | CLI flag | Environment variable | Required | Description |
 |------------|----------|---------------------|----------|-------------|
-| Developer token | `--developer-token` | `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | From Google Ads API Center (manager account) |
+| Legacy developer token | `--developer-token` | `GOOGLE_ADS_DEVELOPER_TOKEN` | No | Optional compatibility setting; Google ignores this header |
 | OAuth2 client ID | `--client-id` | `GOOGLE_ADS_CLIENT_ID` | Yes | From GCP OAuth2 credentials |
 | OAuth2 client secret | `--client-secret` | `GOOGLE_ADS_CLIENT_SECRET` | Yes | From GCP OAuth2 credentials |
 | Refresh token | `--refresh-token` | `GOOGLE_ADS_REFRESH_TOKEN` | Yes | From one-time OAuth2 flow |
@@ -234,10 +230,9 @@ Credentials are resolved in this priority order: **CLI flag > environment variab
 
 ### `.env` File
 
-Place a `.env` file in the same directory as the binary:
+Place an ignored `.env` file in the server working directory:
 
 ```env
-GOOGLE_ADS_DEVELOPER_TOKEN=your-developer-token
 GOOGLE_ADS_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_ADS_CLIENT_SECRET=your-client-secret
 GOOGLE_ADS_REFRESH_TOKEN=your-refresh-token
@@ -292,11 +287,11 @@ and [Transports](https://www.devleader.ca/projects/google-keyword-planner-mcp/tr
 Generates related keyword ideas from seed keywords and/or a URL.
 
 **Parameters:**
-- `seedKeywords` (optional) -- comma-separated seed keywords (e.g. `"C# tutorial, dotnet performance"`)
+- `seed_keywords` (optional) -- array of seed keywords (e.g. `["C# tutorial", "dotnet performance"]`)
 - `url` (optional) -- a URL to generate keyword ideas from (e.g. `"https://devleader.ca"`)
 - `language` (optional) -- language resource name (e.g. `"languageConstants/1000"` for English)
 
-At least one of `seedKeywords` or `url` must be provided.
+At least one of `seed_keywords` or `url` must be provided. For US English Google Search only, set `geo_target_constants` to `["geoTargetConstants/2840"]`, `language` to `"languageConstants/1000"`, and `keyword_plan_network` to `"GOOGLE_SEARCH"`.
 
 **Returns:** List of keyword ideas with `avgMonthlySearches`, `competition` (LOW/MEDIUM/HIGH), `lowTopOfPageBidMicros`, `highTopOfPageBidMicros`.
 
@@ -309,7 +304,9 @@ At least one of `seedKeywords` or `url` must be provided.
 Gets historical search volume and competition data for a specific list of keywords.
 
 **Parameters:**
-- `keywords` (required) -- comma-separated list of keywords (e.g. `"dependency injection, SOLID principles"`)
+- `keywords` (required) -- array of keywords (e.g. `["dependency injection", "SOLID principles"]`)
+
+Use `geo_target_constants`, `language`, and `keyword_plan_network` to select location, language, and search network.
 
 **Returns:** Per-keyword metrics including `avgMonthlySearches`, `competition`, `competitionIndex`, bid estimates, and `monthlySearchVolumes` (12-month breakdown).
 
@@ -317,20 +314,20 @@ Gets historical search volume and competition data for a specific list of keywor
 
 ### `get_keyword_forecast`
 
-Projects impressions, clicks, and cost for keywords at a specified maximum CPC bid.
+Projects clicks and cost for keywords at a specified maximum CPC bid.
 
 **Parameters:**
-- `keywords` (required) -- comma-separated list of keywords
-- `maxCpcMicros` (optional, default `1000000`) -- maximum CPC bid in micros (1,000,000 = $1.00)
-- `forecastDays` (optional, default `30`) -- number of days to forecast
+- `keywords` (required) -- array of keywords
+- `max_cpc_micros` (optional, default `1000000`) -- maximum CPC bid in micros (1,000,000 = one unit of account currency)
+- `forecast_days` (optional, default `30`) -- number of days to forecast
 
-**Returns:** Per-keyword projected `impressions`, `clicks`, `costMicros`, and `ctr`.
+**Returns:** Per-keyword projected `clicks`, `costMicros`, average CPC and conversions, plus a combined `total`.
 
 ---
 
 ## Go vs C# -- Which Binary to Use?
 
-Both binaries implement identical behavior. Choose based on preference:
+This task updates the Go binary. The C# binary has not received the v25 fixes described here.
 
 | | Go | C# AOT |
 |---|---|---|
@@ -340,7 +337,7 @@ Both binaries implement identical behavior. Choose based on preference:
 | Platform | All | All |
 | Transports | stdio, HTTP | stdio, HTTP |
 
-For most MCP use cases, either works fine. The Go binary starts slightly faster; the C# binary may be preferred if you're already in a .NET ecosystem. Both support the same [HTTP transport](#transports) with equivalent security defaults.
+Use the Go binary for the v25 Keyword Planner fixes and targeting described above. Both binaries support [HTTP transport](#transports).
 
 ---
 

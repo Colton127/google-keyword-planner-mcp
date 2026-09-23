@@ -1,5 +1,5 @@
 ---
-description: Full reference for all Google Keyword Planner MCP credentials -- CLI flags, environment variables, .env file, customer ID formats, and developer token access levels.
+description: Full reference for all Google Keyword Planner MCP credentials -- CLI flags, environment variables, .env file, customer ID formats, and Google Cloud API access.
 ---
 
 # Configuration
@@ -10,7 +10,7 @@ Credentials are resolved in this priority order: **CLI flag > environment variab
 
 | Credential | CLI flag | Environment variable | Required | Description |
 |------------|----------|---------------------|----------|-------------|
-| Developer token | `--developer-token` | `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | From Google Ads API Center (manager account only) |
+| Legacy developer token | `--developer-token` | `GOOGLE_ADS_DEVELOPER_TOKEN` | No | Optional compatibility setting; Google ignores this header |
 | OAuth2 client ID | `--client-id` | `GOOGLE_ADS_CLIENT_ID` | Yes | From GCP OAuth2 credentials (Desktop app type) |
 | OAuth2 client secret | `--client-secret` | `GOOGLE_ADS_CLIENT_SECRET` | Yes | From GCP OAuth2 credentials |
 | Refresh token | `--refresh-token` | `GOOGLE_ADS_REFRESH_TOKEN` | Yes | From one-time OAuth2 flow (see [Getting Started](getting-started.md)) |
@@ -26,10 +26,9 @@ Credentials are resolved in this priority order: **CLI flag > environment variab
 
 ## .env File
 
-Place a `.env` file in the same directory as the binary. The binary reads it automatically:
+Place a `.env` file in the server working directory. The binary reads it automatically:
 
 ```env
-GOOGLE_ADS_DEVELOPER_TOKEN=your-developer-token
 GOOGLE_ADS_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_ADS_CLIENT_SECRET=your-client-secret
 GOOGLE_ADS_REFRESH_TOKEN=your-refresh-token
@@ -52,13 +51,9 @@ Dashes are stripped automatically before the API call.
 
 ---
 
-## Developer Token Access Levels
+## Google Cloud API Access
 
-| Access level | Can call real accounts? | How to get |
-|---|---|---|
-| Test mode (default) | ❌ No -- only [test accounts](https://developers.google.com/google-ads/api/docs/best-practices/test-accounts) | Issued automatically when you create a developer token |
-| Basic access | ✅ Yes | Click **Apply for Basic Access** at `https://ads.google.com/aw/apicenter` and wait a few days |
-| Standard access | ✅ Yes | Apply separately; not required for Keyword Planner |
+Google Ads API access is associated with the Google Cloud project that owns the OAuth client. Basic access allows production calls. See [Google's current access guide](https://developers.google.com/google-ads/api/docs/api-policy/developer-token).
 
 ---
 

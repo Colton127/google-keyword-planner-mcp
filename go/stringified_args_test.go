@@ -128,6 +128,26 @@ func TestGenerateKeywordIdeas_StringifiedSeedKeywords_CoercedByMiddleware(t *tes
 	}
 }
 
+func TestGenerateKeywordIdeas_StringifiedGeoTargets_CoercedByMiddleware(t *testing.T) {
+	t.Parallel()
+	clientSession := newTestServerAndClient(t, `{"results": []}`, func(s *mcp.Server) {
+		s.AddReceivingMiddleware(coerceStringifiedArrayArgs(toolArrayFields))
+	})
+	result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "generate_keyword_ideas",
+		Arguments: map[string]any{
+			"seed_keywords":        []string{"affirmations"},
+			"geo_target_constants": `["geoTargetConstants/2840"]`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("stringified geo target should be coerced: %v", result.Content)
+	}
+}
+
 // TestGenerateKeywordIdeas_GenuineArraySeedKeywords_StillWorks confirms the
 // coercion middleware is a no-op for well-formed clients that already send a
 // genuine JSON array -- it must not interfere with the standard-compliant path.

@@ -28,6 +28,7 @@ __pycache__/
 
 # Environment
 .env
+application_default_credentials.json
 
 # Editor
 .vscode/
