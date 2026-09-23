@@ -1,23 +1,18 @@
 ---
-description: Step-by-step guide to setting up the Google Keyword Planner MCP server -- Google Ads account, developer token, OAuth2 refresh token, and binary download.
+description: Step-by-step guide to setting up the Google Keyword Planner MCP server -- Google Ads account, Cloud project access, OAuth2 refresh token, and binary download.
 ---
 
 # Getting Started
 
-The Google Ads Keyword Planner API has more prerequisites than most APIs -- you need a Google Ads manager account, a developer token, and an OAuth2 refresh token. This page walks through every step.
+The Google Ads Keyword Planner API needs a Google Ads customer, Google Cloud project with API access, and OAuth2 credentials.
 
 ---
 
 ## Prerequisites
 
-You need all seven of these before the MCP server will work:
+1. **Google Cloud project with Google Ads API access.** Basic access is sufficient for production. [Google sunset developer tokens in September 2026](https://developers.google.com/google-ads/api/docs/api-policy/developer-token); access now follows the project that owns your OAuth client.
 
-1. **Google Ads manager account (MCC)** -- developer tokens are only issued to manager accounts, not regular accounts. Create one free at [ads.google.com/home/tools/manager-accounts](https://ads.google.com/home/tools/manager-accounts/).
-
-2. **Developer token with Basic or Standard access** -- in your manager account, go to `https://ads.google.com/aw/apicenter` and copy your developer token.
-
-    !!! warning "New tokens start in test mode"
-        A brand-new developer token can only call the API against [Google Ads test accounts](https://developers.google.com/google-ads/api/docs/best-practices/test-accounts). Calls to real accounts return `DEVELOPER_TOKEN_NOT_APPROVED` until you apply for Basic access. In the API Center, click **Apply for Basic Access** and fill in the form. Google reviews requests within a few days. Basic access is sufficient -- Standard access is not required.
+2. **Google Ads account access.** Use a manager account only when the target customer is accessed through one.
 
 3. **Google Ads account with billing configured** -- the Keyword Planner API requires an account with an active payment method. You do not need to run ads or spend money; you just need a payment method on file. This can be your manager account itself or a separate sub-account.
 
@@ -131,7 +126,6 @@ See **[Setup by Tool](setup-by-tool.md)** for exact configuration snippets for C
 The minimum required environment variables are:
 
 ```env
-GOOGLE_ADS_DEVELOPER_TOKEN=your-developer-token
 GOOGLE_ADS_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_ADS_CLIENT_SECRET=your-client-secret
 GOOGLE_ADS_REFRESH_TOKEN=your-refresh-token

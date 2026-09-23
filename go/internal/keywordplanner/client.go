@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	tokenURL    = "https://oauth2.googleapis.com/token"
-	adsAPIBase  = "https://googleads.googleapis.com/v25"
+	tokenURL      = "https://oauth2.googleapis.com/token"
+	adsAPIBase    = "https://googleads.googleapis.com/v25"
 	adsAPIVersion = "v25"
-	httpTimeout = 30 * time.Second
+	httpTimeout   = 30 * time.Second
 )
 
 // Client calls the Google Ads Keyword Planner API.
@@ -84,8 +84,10 @@ func (c *Client) GenerateKeywordIdeas(
 	seedKeywords []string,
 	seedURL string,
 	language string,
+	geoTargetConstants []string,
+	keywordPlanNetwork string,
 ) (*KeywordIdeasResponse, error) {
-	reqBody := c.buildKeywordIdeasRequest(seedKeywords, seedURL, language)
+	reqBody := c.buildKeywordIdeasRequest(seedKeywords, seedURL, language, geoTargetConstants, keywordPlanNetwork)
 	endpoint := fmt.Sprintf("%s/customers/%s:generateKeywordIdeas", c.baseURL, c.customerID)
 
 	var raw generateKeywordIdeasResponse
@@ -122,11 +124,13 @@ func (c *Client) GetHistoricalMetrics(
 	keywords []string,
 	language string,
 	geoTargetConstants []string,
+	keywordPlanNetwork string,
 ) (*HistoricalMetricsResponse, error) {
 	reqBody := generateHistoricalMetricsRequest{
 		Keywords:           keywords,
 		Language:           language,
 		GeoTargetConstants: geoTargetConstants,
+		KeywordPlanNetwork: keywordPlanNetwork,
 	}
 	endpoint := fmt.Sprintf("%s/customers/%s:generateKeywordHistoricalMetrics", c.baseURL, c.customerID)
 
@@ -282,7 +286,9 @@ func (c *Client) post(ctx context.Context, endpoint string, body, out any) error
 		return fmt.Errorf("building request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("developer-token", c.developerToken)
+	if c.developerToken != "" {
+		req.Header.Set("developer-token", c.developerToken)
+	}
 	if c.loginCustomerID != "" {
 		req.Header.Set("login-customer-id", c.loginCustomerID)
 	}
@@ -309,8 +315,8 @@ func (c *Client) post(ctx context.Context, endpoint string, body, out any) error
 	return nil
 }
 
-func (c *Client) buildKeywordIdeasRequest(seedKeywords []string, seedURL, language string) generateKeywordIdeasRequest {
-	req := generateKeywordIdeasRequest{Language: language}
+func (c *Client) buildKeywordIdeasRequest(seedKeywords []string, seedURL, language string, geoTargetConstants []string, keywordPlanNetwork string) generateKeywordIdeasRequest {
+	req := generateKeywordIdeasRequest{Language: language, GeoTargetConstants: geoTargetConstants, KeywordPlanNetwork: keywordPlanNetwork}
 	switch {
 	case len(seedKeywords) > 0 && seedURL != "":
 		req.KeywordAndURLSeed = &keywordAndURLSeed{URL: seedURL, Keywords: seedKeywords}
@@ -342,5 +348,3 @@ func parseMonthEnum(month string) int32 {
 	}
 	return 0
 }
-
-

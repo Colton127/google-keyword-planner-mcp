@@ -67,7 +67,7 @@ func main() {
 
 	if !cfg.IsComplete() {
 		slog.Error("incomplete Google Ads credentials",
-			"hint", "set GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CLIENT_ID, "+
+			"hint", "set GOOGLE_ADS_CLIENT_ID, "+
 				"GOOGLE_ADS_CLIENT_SECRET, GOOGLE_ADS_REFRESH_TOKEN, GOOGLE_ADS_CUSTOMER_ID")
 		os.Exit(1)
 	}
@@ -182,9 +182,11 @@ func splitAndTrim(s string) []string {
 // exported JSON schema: the tool only requires that at least one of them be provided,
 // which is enforced at runtime in generateKeywordIdeas rather than by the schema.
 type generateKeywordIdeasInput struct {
-	SeedKeywords []string `json:"seed_keywords,omitempty" jsonschema:"Seed keywords to generate ideas from (e.g. ['C# tutorial', 'dotnet performance']). At least one of seed_keywords or url must be provided."`
-	URL          string   `json:"url,omitempty"           jsonschema:"A URL to generate ideas from (e.g. 'https://devleader.ca'). At least one of seed_keywords or url must be provided."`
-	Language     string   `json:"language,omitempty"      jsonschema:"Language resource name (e.g. 'languageConstants/1000' for English). Omit to use all languages."`
+	SeedKeywords       []string `json:"seed_keywords,omitempty" jsonschema:"Seed keywords to generate ideas from (e.g. ['C# tutorial', 'dotnet performance']). At least one of seed_keywords or url must be provided."`
+	URL                string   `json:"url,omitempty"           jsonschema:"A URL to generate ideas from (e.g. 'https://devleader.ca'). At least one of seed_keywords or url must be provided."`
+	Language           string   `json:"language,omitempty"      jsonschema:"Language resource name (e.g. 'languageConstants/1000' for English). Omit to use all languages."`
+	GeoTargetConstants []string `json:"geo_target_constants,omitempty" jsonschema:"Geo target resource names (e.g. ['geoTargetConstants/2840'] for the United States). Omit for worldwide volumes."`
+	KeywordPlanNetwork string   `json:"keyword_plan_network,omitempty" jsonschema:"GOOGLE_SEARCH or GOOGLE_SEARCH_AND_PARTNERS. Use GOOGLE_SEARCH for search-only volumes."`
 }
 
 // getHistoricalMetricsInput is the input schema for the get_historical_metrics tool.
@@ -192,6 +194,7 @@ type getHistoricalMetricsInput struct {
 	Keywords           []string `json:"keywords"                       jsonschema:"List of keywords to get historical search metrics for (e.g. ['dependency injection', 'SOLID principles'])."`
 	Language           string   `json:"language,omitempty"             jsonschema:"Language resource name (e.g. 'languageConstants/1030' for Polish, 'languageConstants/1000' for English). Omit to cover all languages."`
 	GeoTargetConstants []string `json:"geo_target_constants,omitempty" jsonschema:"Locations to report volumes for, as geo target constant resource names (e.g. ['geoTargetConstants/2616'] for Poland). Omit only if you want worldwide volumes."`
+	KeywordPlanNetwork string   `json:"keyword_plan_network,omitempty" jsonschema:"GOOGLE_SEARCH or GOOGLE_SEARCH_AND_PARTNERS. Use GOOGLE_SEARCH for search-only volumes."`
 }
 
 // getKeywordForecastInput is the input schema for the get_keyword_forecast tool.
@@ -211,7 +214,7 @@ func generateKeywordIdeas(ctx context.Context, client *keywordplanner.Client, in
 		b, _ := json.Marshal(errResult)
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil, nil
 	}
-	result, err := client.GenerateKeywordIdeas(ctx, input.SeedKeywords, input.URL, input.Language)
+	result, err := client.GenerateKeywordIdeas(ctx, input.SeedKeywords, input.URL, input.Language, input.GeoTargetConstants, input.KeywordPlanNetwork)
 	if err != nil {
 		errResult := map[string]string{"error": fmt.Sprintf("generating keyword ideas: %v", err)}
 		b, _ := json.Marshal(errResult)
@@ -225,7 +228,7 @@ func generateKeywordIdeas(ctx context.Context, client *keywordplanner.Client, in
 }
 
 func getHistoricalMetrics(ctx context.Context, client *keywordplanner.Client, input getHistoricalMetricsInput) (*mcp.CallToolResult, any, error) {
-	result, err := client.GetHistoricalMetrics(ctx, input.Keywords, input.Language, input.GeoTargetConstants)
+	result, err := client.GetHistoricalMetrics(ctx, input.Keywords, input.Language, input.GeoTargetConstants, input.KeywordPlanNetwork)
 	if err != nil {
 		errResult := map[string]string{"error": fmt.Sprintf("getting historical metrics: %v", err)}
 		b, _ := json.Marshal(errResult)

@@ -70,7 +70,7 @@ func TestGenerateKeywordIdeas_SendsLoginCustomerIDHeader(t *testing.T) {
 	client := keywordplanner.NewTestClient(
 		"dev-token", "3778350596", "1381404200", srv.URL, srv.Client(),
 	)
-	_, _ = client.GenerateKeywordIdeas(context.Background(), []string{"go"}, "", "")
+	_, _ = client.GenerateKeywordIdeas(context.Background(), []string{"go"}, "", "", nil, "")
 
 	if capturedLoginID != "1381404200" {
 		t.Errorf("login-customer-id header = %q, want %q", capturedLoginID, "1381404200")
@@ -93,7 +93,7 @@ func TestGenerateKeywordIdeas_OmitsLoginCustomerIDHeaderWhenEmpty(t *testing.T) 
 	client := keywordplanner.NewTestClient(
 		"dev-token", "3778350596", "", srv.URL, srv.Client(),
 	)
-	_, _ = client.GenerateKeywordIdeas(context.Background(), []string{"go"}, "", "")
+	_, _ = client.GenerateKeywordIdeas(context.Background(), []string{"go"}, "", "", nil, "")
 
 	if capturedLoginID != "" {
 		t.Errorf("login-customer-id header should be absent, got %q", capturedLoginID)
@@ -273,6 +273,7 @@ func TestGetHistoricalMetrics_ParsesResultsField(t *testing.T) {
 		[]string{"warsztaty ceramiczne"},
 		"languageConstants/1030",
 		[]string{"geoTargetConstants/2616"},
+		"",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -297,6 +298,55 @@ func TestGetHistoricalMetrics_ParsesResultsField(t *testing.T) {
 	}
 }
 
+func TestTargetingSerializedForIdeasAndHistoricalMetrics(t *testing.T) {
+	for _, targeted := range []bool{false, true} {
+		for _, tool := range []string{"ideas", "historical"} {
+			t.Run(tool+map[bool]string{true: "_targeted", false: "_omitted"}[targeted], func(t *testing.T) {
+				var body map[string]any
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if got := r.Header.Get("developer-token"); got != "" {
+						t.Errorf("unexpected developer-token header: %q", got)
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode request: %v", err)
+					}
+					_, _ = w.Write([]byte(`{"results":[]}`))
+				}))
+				defer srv.Close()
+				client := keywordplanner.NewTestClient("", "123", "", srv.URL, srv.Client())
+				var geo []string
+				var language, network string
+				if targeted {
+					geo = []string{"geoTargetConstants/2840"}
+					language = "languageConstants/1000"
+					network = "GOOGLE_SEARCH"
+				}
+				var err error
+				if tool == "ideas" {
+					_, err = client.GenerateKeywordIdeas(context.Background(), []string{"affirmations"}, "", language, geo, network)
+				} else {
+					_, err = client.GetHistoricalMetrics(context.Background(), []string{"affirmations"}, language, geo, network)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				for field, want := range map[string]any{"language": language, "keywordPlanNetwork": network} {
+					if got := body[field]; targeted && got != want || !targeted && got != nil {
+						t.Errorf("%s = %v, want %v", field, got, want)
+					}
+				}
+				if targeted {
+					if got := body["geoTargetConstants"].([]any)[0]; got != geo[0] {
+						t.Errorf("geoTargetConstants[0] = %v", got)
+					}
+				} else if _, ok := body["geoTargetConstants"]; ok {
+					t.Error("geoTargetConstants must be omitted")
+				}
+			})
+		}
+	}
+}
+
 func TestPost_ReturnsFullErrorBody(t *testing.T) {
 	t.Parallel()
 
@@ -312,7 +362,7 @@ func TestPost_ReturnsFullErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	client := keywordplanner.NewTestClient("dev-token", "123", "", srv.URL, srv.Client())
-	_, err := client.GenerateKeywordIdeas(context.Background(), []string{"test"}, "", "")
+	_, err := client.GenerateKeywordIdeas(context.Background(), []string{"test"}, "", "", nil, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
